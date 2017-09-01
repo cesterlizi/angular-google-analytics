@@ -239,6 +239,8 @@ to the official [angular ngRoute documentation](https://docs.angularjs.org/api/n
   // $routeProvider and therefore reduces bounce rate created by redirects.
   // NOTE: The following option requires the ngRoute module
   AnalyticsProvider.readFromRoute(true);
+  // NOTE: The following option requires the UI Router module
+  AnalyticsProvider.readFromUIRouter(true);  
   // Add custom routes to the $routeProvider like this. You can also exclude certain routes from tracking by
   // adding 'doNotTrack' property
   $routeProvider

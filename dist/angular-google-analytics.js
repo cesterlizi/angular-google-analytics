@@ -1,6 +1,6 @@
 /**
  * Angular Google Analytics - Easy tracking for your AngularJS application
- * @version v1.1.8 - 2016-12-30
+ * @version v1.1.9 - 2017-09-01
  * @link http://github.com/revolunet/angular-google-analytics
  * @author Julien Bouquillon <julien@revolunet.com> (https://github.com/revolunet)
  * @contributors Julien Bouquillon (https://github.com/revolunet),Justin Saunders (https://github.com/justinsa),Chris Esplin (https://github.com/deltaepsilon),Adam Misiorny (https://github.com/adam187)
@@ -27,7 +27,6 @@
     .provider('Analytics', function () {
       var accounts,
           analyticsJS = true,
-          cookieConfig = 'auto', // DEPRECATED
           created = false,
           crossDomainLinker = false,
           crossLinkDomains,
@@ -47,6 +46,7 @@
           offlineMode = false,
           pageEvent = '$routeChangeSuccess',
           readFromRoute = false,
+          readFromUIRouter = false,
           removeRegExp,
           testMode = false,
           traceDebuggingMode = false,
@@ -118,12 +118,6 @@
 
       this.setPageEvent = function (name) {
         pageEvent = name;
-        return this;
-      };
-
-      /* DEPRECATED */
-      this.setCookieConfig = function (config) {
-        cookieConfig = config;
         return this;
       };
 
@@ -205,6 +199,12 @@
         return this;
       };
 
+      // Enable reading page url from UI router object
+      this.readFromUIRouter = function(val) {
+        readFromUIRouter = !!val;
+        return this;
+      };      
+
       /**
        * Public Service
        */
@@ -244,12 +244,18 @@
           } else {
             $route = $injector.get('$route');
           }
+        } else if (readFromUIRouter) {
+         if (!$injector.has('$state')) {
+            $log.warn('$state service is not available. Make sure you have included ng-route in your application dependencies.');
+          } else {
+            $route = $injector.get('$state');
+          }
         }
 
         // Get url for current page 
         var getUrl = function () {
           // Using ngRoute provided tracking urls
-          if (readFromRoute && $route.current && ('pageTrack' in $route.current)) {
+          if ( (readFromRoute || readFromUIRouter) && $route.current && ('pageTrack' in $route.current)) {
             return $route.current.pageTrack;
           }
            
@@ -309,6 +315,10 @@
         /**
          * Private Methods
          */
+
+        var _getTrackPrefixUrl = function (url) {
+          return trackPrefix + (url ? url : getUrl());
+        };
 
         var _getProtocol = function (httpPostfix, httpsPostfix) {
           var protocol = '',
@@ -422,18 +432,6 @@
           }
         };
 
-        /* DEPRECATED */
-        this._createScriptTag = function () {
-          that._registerScriptTags();
-          that._registerTrackers();
-        };
-
-        /* DEPRECATED */
-        this._createAnalyticsScriptTag = function () {
-          that._registerScriptTags();
-          that._registerTrackers();
-        };
-
         this._registerScriptTags = function () {
           var document = $document[0],
               protocol = _getProtocol(),
@@ -441,7 +439,7 @@
 
           if (created === true) {
             that._log('warn', 'Script tags already created');
-            return;
+            return false;
           }
 
           if (disableAnalytics === true) {
@@ -510,7 +508,7 @@
         this._registerTrackers = function () {
           if (!accounts || accounts.length < 1) {
             that._log('warn', 'No accounts to register');
-            return;
+            return false;
           }
 
           //
@@ -526,21 +524,9 @@
               trackerObj.trackEcommerce = isPropertyDefined('trackEcommerce', trackerObj) ? trackerObj.trackEcommerce : ecommerce;
               trackerObj.trackEvent = isPropertyDefined('trackEvent', trackerObj) ? trackerObj.trackEvent : false;
 
-              // Logic to choose the account fields to be used.
-              // cookieConfig is being deprecated for a tracker specific property: fields.
               var fields = {};
               if (isPropertyDefined('fields', trackerObj)) {
                 fields = trackerObj.fields;
-              } else if (isPropertyDefined('cookieConfig', trackerObj)) {
-                if (angular.isString(trackerObj.cookieConfig)) {
-                  fields.cookieDomain = trackerObj.cookieConfig;
-                } else {
-                  fields = trackerObj.cookieConfig;
-                }
-              } else if (angular.isString(cookieConfig)) {
-                fields.cookieDomain = cookieConfig;
-              } else if (cookieConfig) {
-                fields = cookieConfig;
               }
               if (trackerObj.crossDomainLinker === true) {
                 fields.allowLinker = true;
@@ -590,7 +576,7 @@
               }
 
               if (trackRoutes && !ignoreFirstPageLoad) {
-                _ga(generateCommandName('send', trackerObj), 'pageview', trackPrefix + getUrl());
+                _ga(generateCommandName('send', trackerObj), 'pageview', _getTrackPrefixUrl());
               }
             });
           //
@@ -651,16 +637,15 @@
          * @private
          */
         this._trackPage = function (url, title, custom) {
-          url = url ? url : getUrl();
           title = title ? title : $document[0].title;
           _gaJs(function () {
             // http://stackoverflow.com/questions/7322288/how-can-i-set-a-page-title-with-google-analytics
             _gaq('_set', 'title', title);
-            _gaq('_trackPageview', (trackPrefix + url));
+            _gaq('_trackPageview', _getTrackPrefixUrl(url));
           });
           _analyticsJs(function () {
             var opt_fieldObject = {
-              'page': trackPrefix + url,
+              'page': _getTrackPrefixUrl(url),
               'title': title
             };
             angular.extend(opt_fieldObject, getUtmParams());
@@ -700,7 +685,7 @@
               angular.extend(opt_fieldObject, custom);
             }
             if (!angular.isDefined(opt_fieldObject.page)) {
-              opt_fieldObject.page = getUrl();
+              opt_fieldObject.page = _getTrackPrefixUrl();
             }
             _gaMultipleTrackers(includeFn, 'send', 'event', category, action, label, value, opt_fieldObject);
           });
@@ -1123,7 +1108,7 @@
         if (trackRoutes) {
           $rootScope.$on(pageEvent, function () {
             // Apply $route based filtering if configured
-            if (readFromRoute) {
+            if (readFromRoute || readFromUIRouter) {
               // Avoid tracking undefined routes, routes without template (e.g. redirect routes)
               // and those explicitly marked as 'do not track'
               if (!$route.current || !$route.current.templateUrl || $route.current.doNotTrack) {
@@ -1158,6 +1143,7 @@
             logAllCalls: logAllCalls,
             pageEvent: pageEvent,
             readFromRoute: readFromRoute,
+            readFromUIRouter: readFromUIRouter,
             removeRegExp: removeRegExp,
             testMode: testMode,
             traceDebuggingMode: traceDebuggingMode,
@@ -1166,29 +1152,6 @@
             trackUrlParams: trackUrlParams
           },
           getUrl: getUrl,
-          /* DEPRECATED */
-          setCookieConfig: function (config) {
-            that._log('warn', 'DEPRECATION WARNING: setCookieConfig method is deprecated. Please use tracker fields instead.');
-            return that._setCookieConfig.apply(that, arguments);
-          },
-          /* DEPRECATED */
-          getCookieConfig: function () {
-            that._log('warn', 'DEPRECATION WARNING: getCookieConfig method is deprecated. Please use tracker fields instead.');
-            return cookieConfig;
-          },
-          /* DEPRECATED */
-          createAnalyticsScriptTag: function (config) {
-            that._log('warn', 'DEPRECATION WARNING: createAnalyticsScriptTag method is deprecated. Please use registerScriptTags and registerTrackers methods instead.');
-            if (config) {
-              cookieConfig = config;
-            }
-            return that._createAnalyticsScriptTag();
-          },
-          /* DEPRECATED */
-          createScriptTag: function () {
-            that._log('warn', 'DEPRECATION WARNING: createScriptTag method is deprecated. Please use registerScriptTags and registerTrackers methods instead.');
-            return that._createScriptTag();
-          },
           registerScriptTags: function () {
             return that._registerScriptTags();
           },
